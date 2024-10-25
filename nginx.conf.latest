@@ -1,0 +1,237 @@
+#######################################################################################
+#
+#  Example nginx ~1.10 configurations to pass PCI-DSS, HIPPA, and NIST compliance
+#
+#  Reference platform: CentOS7 + EPEL
+#
+#  Configuration Scanners
+#
+#  * https://www.htbridge.com/ssl
+#    - A+, PCI-DSS, HIPPA, and NIST compliance
+#
+#  * https://globalsign.ssllabs.com/
+#    - A+, Cert: 100, Proto: 98, Key: 90, Cipher Str: 90
+#
+#  * https://www.digicert.com/help/
+#    - All green checks
+#
+user www-data;
+worker_processes auto;
+error_log /var/log/nginx/error.log;
+pid /run/nginx.pid;
+load_module /etc/nginx/modules/ngx_http_modsecurity_module.so;
+# Load dynamic modules. See /usr/share/nginx/README.dynamic.
+include /usr/share/nginx/modules/*.conf;
+events {
+    # for high performance VM
+    worker_connections 8096;
+    multi_accept on;
+    use epoll;
+}
+worker_rlimit_nofile 40000;
+http {
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" ' '$status $body_bytes_sent "$http_referer" ' '"$http_user_agent" "$http_x_forwarded_for"';
+    access_log /var/log/nginx/access.log main;
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+    server_tokens off;
+    client_max_body_size 512M;
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    # Load modular configuration files from the /etc/nginx/conf.d directory.
+    include /etc/nginx/conf.d/*.conf;
+    proxy_cache_path /var/lib/cache levels=1:2 keys_zone=my_cache:10m max_size=10g inactive=60m use_temp_path=off;
+    # Enable optional HSTS
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    # X-Frame-Options Protection
+    add_header X-Frame-Options "SAMEORIGIN";
+    # X-XSS-Protection
+    add_header X-XSS-Protection "1; mode=block";
+    # X-Content-Type-Options
+    add_header X-Content-Type-Options nosniff;
+    # Content-Security-Policy
+    add_header Content-Security-Policy "default-src 'self' *.google.com *.amazon.com;";
+    # simply redirects to HTTPS
+    server {
+        listen 80;
+        listen indiaonlinepay.com;
+        server_name indiaonlinepay.com www.indiaonlinepay.com;
+        # listen       80 default_server;
+        # listen       [::]:80 default_server;
+        # server_name _;
+        if ( $host != "indiaonlinepay.com" ) {
+            return 444;
+        }
+        return 301 https://$host$request_uri;
+    }
+    #   server {
+    #	listen 80;
+    #	listen beta.indiaonlinepay.com;
+    #	server_name beta.indiaonlinepay.com;
+    #	if ( $http_host != "beta.indiaonlinepay.com" ) {
+    #		return 444;
+    #	}
+    #
+    #        location / {        
+    #            proxy_cache my_cache;
+    #            proxy_cache_lock on;
+    #            proxy_cache_valid 202 302 10m;
+    #            proxy_cache_valid 404 1m;
+    #            proxy_pass http://127.0.0.1:9000;
+    #        }
+    #
+    #
+    #   }
+    server {
+        listen 443 ssl default_server;
+        #listen 443 ssl  default_server;
+        #	listen 20.219.73.237 http2 default_server;
+        listen 20.219.73.237 ssl  default_server;
+        server_name indiaonlinepay.com www.indiaonlinepay.com default_server;
+        modsecurity on;
+        modsecurity_rules_file /etc/nginx/modsec/main.conf;
+        #   listen       443 ssl http2 default_server;
+        #   listen       [::]:443 ssl http2 default_server;
+        #   root         /usr/share/nginx/html;
+        sendfile on;
+        tcp_nopush on;
+        tcp_nodelay on;
+        keepalive_timeout 65;
+        server_tokens off;
+        # Do not use a standard single crt sent from your CA
+        #ssl_certificate "/etc/ssl/www.example.com.crt";
+        # SSL Bundle creation howto: https://gist.github.com/bradmontgomery/6487319
+        # Example: cat www.example.com.crt COMODORSADomainValidationSecureServerCA.crt COMODORSAAddTrustCA.crt > ssl-bundle.pem
+        ssl_certificate /etc/nginx/indiaonlinepay-prod-public.crt;
+        ssl_certificate_key /etc/nginx/indiaonlinepay-prod-private.key;
+        ssl_password_file /etc/nginx/indiaonlinepay-prod-password-file;
+        # ssl_certificate "/etc/ssl/ssl-bundle.pem";
+        # ssl_certificate_key "/etc/ssl/www.example.com.key";
+        # Create with: sudo openssl dhparam -dsaparam -out /etc/ssl/dhparam.pem 4096
+        ssl_dhparam /etc/ssl/dhparam.pem;
+        # TLSv1.0 prevented for PCI-DSS compliance
+        ssl_protocols TLSv1.1 TLSv1.2;
+        ssl_session_cache shared:SSL:60m;
+        ssl_session_timeout 60m;
+        # Updated Cipher Suites
+        ssl_ciphers 'ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES128-SHA:ECDHE-RSA-AES256-SHA384:ECDHE-RSA-AES128-SHA:ECDHE-ECDSA-AES256-SHA384:ECDHE-ECDSA-AES256-SHA:ECDHE-RSA-AES256-SHA:DHE-RSA-AES128-SHA256:DHE-RSA-AES128-SHA:DHE-RSA-AES256-SHA256:DHE-RSA-AES256-SHA:AES128-GCM-SHA256:AES256-GCM-SHA384:AES128-SHA256:AES256-SHA256:AES128-SHA:AES256-SHA:!DSS';
+        ssl_prefer_server_ciphers on;
+        # Enable HSTS
+        add_header Strict-Transport-Security max-age=15768000;
+        # OCSP Setup
+        # To test locally:
+        # (This test can be positive and a bad ssl_trusted_certificate pem can still break OCSP.)
+        #
+        # And look for this:
+        #
+        #OCSP response: 
+        #======================================
+        #OCSP Response Data:
+        #    OCSP Response Status: successful (0x0)
+        #    Response Type: Basic OCSP Response
+        #    Version: 1 (0x0)
+        #<!-- cut -->
+        #
+        ssl_stapling on;
+        ssl_stapling_verify on;
+        # Google public DNS servers used in example
+        resolver 8.8.8.8 8.8.4.4 valid=300s;
+        resolver_timeout 2s;
+        # Created with: cat /etc/ssl/ssl-bundle.pem /etc/ssl/www.example.com.externalcaroot > /etc/ssl/ca.trust
+        ssl_trusted_certificate "/etc/nginx/indiaonlinepay-prod-public.crt";
+        #        ssl_trusted_certificate "/etc/ssl/ca.trust";
+        # Example of a proxy to an AWS S3 Bucket
+        location / {
+            proxy_cache my_cache;
+            proxy_cache_lock on;
+            proxy_cache_valid 202 302 10m;
+            proxy_cache_valid 404 1m;
+#            if ( $http_host != "indiaonlinepay.com" ) {
+#           	 return 404;
+#            }
+	    proxy_set_header X-Real-IP $remote_addr;
+	    proxy_set_header X-Forwarded-Host $host;
+	    proxy_set_header X-Forwarded-Port $server_port;
+            proxy_pass http://localhost:8080;
+	    proxy_connect_timeout 240s;
+            proxy_read_timeout 240s;
+	    proxy_send_timeout 240s;
+	    client_body_timeout 240s;
+        }
+        include /etc/nginx/default.d/*.conf;
+    }
+    server {
+        listen 443 ssl ;
+        #listen 443 ssl  default_server;
+        #	listen 20.219.73.237 http2 default_server;
+        listen 20.219.73.237 ssl ;
+        server_name beta.indiaonlinepay.com default_server;
+        if ( $host != "beta.indiaonlinepay.com" ) {
+            return 444;
+        }
+        modsecurity off;
+        modsecurity_rules_file /etc/nginx/modsec/main.conf;
+        #   listen       443 ssl http2 default_server;
+        #   listen       [::]:443 ssl http2 default_server;
+        #   root         /usr/share/nginx/html;
+        sendfile on;
+        tcp_nopush on;
+        tcp_nodelay on;
+        keepalive_timeout 65;
+        server_tokens off;
+        # Do not use a standard single crt sent from your CA
+        #ssl_certificate "/etc/ssl/www.example.com.crt";
+        # SSL Bundle creation howto: https://gist.github.com/bradmontgomery/6487319
+        # Example: cat www.example.com.crt COMODORSADomainValidationSecureServerCA.crt COMODORSAAddTrustCA.crt > ssl-bundle.pem
+        ssl_certificate /etc/nginx/indiaonlinepay-prod-public.crt;
+        ssl_certificate_key /etc/nginx/indiaonlinepay-prod-private.key;
+        ssl_password_file /etc/nginx/indiaonlinepay-prod-password-file;
+        # ssl_certificate "/etc/ssl/ssl-bundle.pem";
+        # ssl_certificate_key "/etc/ssl/www.example.com.key";
+        # Create with: sudo openssl dhparam -dsaparam -out /etc/ssl/dhparam.pem 4096
+        ssl_dhparam /etc/ssl/dhparam.pem;
+        # TLSv1.0 prevented for PCI-DSS compliance
+        ssl_protocols TLSv1.1 TLSv1.2;
+        ssl_session_cache shared:SSL:60m;
+        ssl_session_timeout 60m;
+        # Updated Cipher Suites
+        ssl_ciphers 'ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES128-SHA:ECDHE-RSA-AES256-SHA384:ECDHE-RSA-AES128-SHA:ECDHE-ECDSA-AES256-SHA384:ECDHE-ECDSA-AES256-SHA:ECDHE-RSA-AES256-SHA:DHE-RSA-AES128-SHA256:DHE-RSA-AES128-SHA:DHE-RSA-AES256-SHA256:DHE-RSA-AES256-SHA:AES128-GCM-SHA256:AES256-GCM-SHA384:AES128-SHA256:AES256-SHA256:AES128-SHA:AES256-SHA:!DSS';
+        ssl_prefer_server_ciphers on;
+        # Enable HSTS
+        add_header Strict-Transport-Security max-age=15768000;
+        # OCSP Setup
+        # To test locally:
+        # (This test can be positive and a bad ssl_trusted_certificate pem can still break OCSP.)
+        #
+        # And look for this:
+        #
+        #OCSP response: 
+        #======================================
+        #OCSP Response Data:
+        #    OCSP Response Status: successful (0x0)
+        #    Response Type: Basic OCSP Response
+        #    Version: 1 (0x0)
+        #<!-- cut -->
+        #
+        ssl_stapling on;
+        ssl_stapling_verify on;
+        # Google public DNS servers used in example
+        resolver 8.8.8.8 8.8.4.4 valid=300s;
+        resolver_timeout 2s;
+        # Created with: cat /etc/ssl/ssl-bundle.pem /etc/ssl/www.example.com.externalcaroot > /etc/ssl/ca.trust
+        ssl_trusted_certificate "/etc/nginx/indiaonlinepay-prod-public.crt";
+        #        ssl_trusted_certificate "/etc/ssl/ca.trust";
+        # Example of a proxy to an AWS S3 Bucket
+        location / {
+            proxy_cache my_cache;
+            proxy_cache_lock on;
+            proxy_cache_valid 202 302 10m;
+            proxy_cache_valid 404 1m;
+            proxy_pass http://localhost:9000;
+        }
+        include /etc/nginx/default.d/*.conf;
+    }
+}
